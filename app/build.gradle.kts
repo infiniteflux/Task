@@ -58,11 +58,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     implementation("com.github.pedroSG94.RootEncoder:library:2.6.5")
-    implementation("com.github.pedro-rts-streamer:rtspserver:2.6.5")
     implementation("androidx.navigation:navigation-compose:2.7.6")
 
-
-    
     implementation("androidx.core:core-ktx:1.13.1")
 
 }
