@@ -1,56 +1,54 @@
 package com.example.task
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import com.pedro.common.ConnectChecker
-import com.pedro.library.generic.GenericStream
-import com.pedro.encoder.input.sources.video.ScreenSource
-import com.pedro.encoder.input.sources.audio.MicrophoneSource
+import com.pedro.rtspserver.RtspServerDisplay
+import java.net.NetworkInterface
 
-class ScreenCastService : Service(), ConnectChecker {
+class ScreenStreamingService : Service(), ConnectChecker {
 
     companion object {
-        private const val TAG = "ScreenCastService"
-        private const val NOTIFICATION_ID = 1001
-        private const val CHANNEL_ID = "ScreenCastChannel"
-        const val ACTION_START = "ACTION_START"
-        const val ACTION_STOP = "ACTION_STOP"
-        const val EXTRA_RESULT_CODE = "EXTRA_RESULT_CODE"
-        const val EXTRA_RESULT_DATA = "EXTRA_RESULT_DATA"
-        const val RTSP_PORT = 8554
+        private const val TAG = "ScreenStreamService"
+        private const val CHANNEL_ID = "screen_streaming_channel"
+        private const val NOTIFICATION_ID = 1
+        private const val RTSP_PORT = 1935
+        const val EXTRA_RESULT_CODE = "extra_result_code"
+        const val EXTRA_DATA = "extra_data"
+        const val ACTION_START = "action_start"
+        const val ACTION_STOP = "action_stop"
+
+        var isStreaming = false
+            private set
+
+        var streamUrl: String? = null
+            private set
     }
 
-    private var genericStream: GenericStream? = null
+    private var rtspServerDisplay: RtspServerDisplay? = null
+    private var resultCode: Int = 0
+    private var data: Intent? = null
 
     override fun onCreate() {
         super.onCreate()
+        Log.d(TAG, "Service created")
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-                val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-                } else {
-                    @Suppress("DEPRECATION")
-                    intent.getParcelableExtra(EXTRA_RESULT_DATA)
-                }
-
-                if (resultCode == -1 && data != null) {
-                    startForeground(NOTIFICATION_ID, createNotification("Initializing..."))
-                    startStreaming(resultCode, data)
-                }
+                resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
+                data = intent.getParcelableExtra(EXTRA_DATA)
+                startStreaming()
             }
             ACTION_STOP -> {
                 stopStreaming()
@@ -60,106 +58,133 @@ class ScreenCastService : Service(), ConnectChecker {
         return START_STICKY
     }
 
-    private fun startStreaming(resultCode: Int, data: Intent) {
+    private fun startStreaming() {
+        if (isStreaming) {
+            Log.d(TAG, "Already streaming")
+            return
+        }
+
+        startForeground(NOTIFICATION_ID, createNotification("Starting stream..."))
+
         try {
-            val mediaProjectionManager = getSystemService(MediaProjectionManager::class.java)
-            val mediaProjection: MediaProjection? = mediaProjectionManager.getMediaProjection(resultCode, data)
-
-            if (mediaProjection == null) {
-                Log.e(TAG, "MediaProjection is null, cannot start streaming.")
-                sendBroadcast(Intent("STREAMING_FAILED").apply {
-                    putExtra("reason", "MediaProjection could not be acquired.")
-                })
-                stopSelf()
-                return
+            // Initialize RTSP Server Display
+            rtspServerDisplay = RtspServerDisplay(
+                this,
+                true,
+                this,
+                RTSP_PORT
+            ).apply {
+                setIntentResult(resultCode, data)
             }
-            //
-            val screenSource = ScreenSource(applicationContext, mediaProjection, null)
-            val microphoneSource = MicrophoneSource()
 
-            genericStream = GenericStream(applicationContext, this, screenSource, microphoneSource).apply {
+            // Prepare video and audio
+            val prepared = rtspServerDisplay?.prepareVideo(
+                1280, // width
+                720,  // height
+                30,   // fps
+                2500 * 1024, // bitrate (2.5 Mbps)
+                0,    // rotation
+                320   // dpi
+            ) ?: false
 
-                getGlInterface().setForceRender(true, 15)
+            val audioPrepared = rtspServerDisplay?.prepareAudio(
+                44100,
+                128 * 1024,
+                true,
+            ) ?: false
 
-                val videoPrepared = prepareVideo(
-                    width = 1280,
-                    height = 720,
-                    bitrate = 2500 * 1024,
-                    fps = 30,
-                    iFrameInterval = 2,
-                    rotation = 0
-                )
+            if (prepared && audioPrepared) {
+                // Start the RTSP server
+                rtspServerDisplay?.startStream()
+                isStreaming = true
 
-                val audioPrepared = prepareAudio(
-                    bitrate = 128 * 1024,
-                    sampleRate = 44100,
-                    isStereo = true,
-                    echoCanceler = true,
-                    noiseSuppressor = true
-                )
+                // Get local IP address
+                val ipAddress = getLocalIpAddress()
+                streamUrl = "rtsp://$ipAddress:$RTSP_PORT/live"
 
-                if (videoPrepared && audioPrepared) {
-                    val rtspUrl = "rtsp://localhost:$RTSP_PORT"
-                    startStream(rtspUrl)
-
-                    sendBroadcast(Intent("STREAMING_STARTED"))
-                    updateNotification("Streaming Active")
-                    Log.i(TAG, "Streaming started successfully on: $rtspUrl")
-                } else {
-                    Log.e(TAG, "Failed to prepare video/audio. Video: $videoPrepared, Audio: $audioPrepared")
-                    sendBroadcast(Intent("STREAMING_FAILED").apply {
-                        putExtra("reason", "Failed to prepare encoder")
-                    })
-                    stopSelf()
-                }
+                updateNotification("Streaming at: $streamUrl")
+                Log.d(TAG, "Stream started: $streamUrl")
+            } else {
+                Log.e(TAG, "Failed to prepare stream")
+                updateNotification("Failed to start stream")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error starting stream", e)
-            sendBroadcast(Intent("STREAMING_FAILED").apply {
-                putExtra("reason", e.message ?: "Unknown error")
-            })
-            stopSelf()
+            updateNotification("Error: ${e.message}")
         }
     }
 
     private fun stopStreaming() {
-        genericStream?.let {
-            if (it.isStreaming) {
-                it.stopStream()
+        Log.d(TAG, "Stopping stream")
+        rtspServerDisplay?.stopStream()
+        isStreaming = false
+        streamUrl = null
+        updateNotification("Stream stopped")
+    }
+
+    private fun getLocalIpAddress(): String {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            for (networkInterface in interfaces) {
+                val addresses = networkInterface.inetAddresses
+                for (address in addresses) {
+                    if (!address.isLoopbackAddress) {
+                        val hostAddress = address.hostAddress
+                        // Check for IPv4
+                        if (hostAddress != null && hostAddress.indexOf(':') < 0) {
+                            return hostAddress
+                        }
+                    }
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting IP address", e)
         }
-        genericStream?.release()
-        genericStream = null
-        sendBroadcast(Intent("STREAMING_STOPPED"))
+        return "Unknown"
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Screen Cast Service",
+                "Screen Streaming",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Screen casting is active"
+                description = "Shows when screen is being streamed"
             }
-            val notificationManager = getSystemService(NotificationManager::class.java)
+
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
         }
     }
 
-    private fun createNotification(text: String): Notification {
+    private fun createNotification(message: String): android.app.Notification {
+        val stopIntent = Intent(this, ScreenStreamingService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            0,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Screen Cast")
-            .setContentText(text)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Screen Mirroring")
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(
+                android.R.drawable.ic_media_pause,
+                "Stop",
+                stopPendingIntent
+            )
             .build()
     }
 
-    private fun updateNotification(text: String) {
-        val notification = createNotification(text)
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.notify(NOTIFICATION_ID, notification)
+    private fun updateNotification(message: String) {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIFICATION_ID, createNotification(message))
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -167,43 +192,36 @@ class ScreenCastService : Service(), ConnectChecker {
     override fun onDestroy() {
         super.onDestroy()
         stopStreaming()
+        Log.d(TAG, "Service destroyed")
     }
 
     // ConnectChecker callbacks
-    override fun onAuthError() {
-        Log.e(TAG, "Auth error")
-        sendBroadcast(Intent("STREAMING_FAILED").apply {
-            putExtra("reason", "Authentication error")
-        })
+    override fun onConnectionStarted(url: String) {
+        Log.d(TAG, "Connection started: $url")
     }
 
-    override fun onAuthSuccess() {
-        Log.i(TAG, "Auth success")
+    override fun onConnectionSuccess() {
+        Log.d(TAG, "Connection successful")
     }
 
     override fun onConnectionFailed(reason: String) {
         Log.e(TAG, "Connection failed: $reason")
-        sendBroadcast(Intent("STREAMING_FAILED").apply {
-            putExtra("reason", reason)
-        })
-    }
-
-    override fun onConnectionStarted(url: String) {
-        Log.i(TAG, "Connection started: $url")
-        updateNotification("Streaming to: $url")
-    }
-
-    override fun onConnectionSuccess() {
-        Log.i(TAG, "Connection success")
-        updateNotification("Connected successfully")
-    }
-
-    override fun onDisconnect() {
-        Log.i(TAG, "Disconnected")
-        sendBroadcast(Intent("STREAMING_STOPPED"))
+        updateNotification("Connection failed: $reason")
     }
 
     override fun onNewBitrate(bitrate: Long) {
         Log.d(TAG, "New bitrate: $bitrate")
+    }
+
+    override fun onDisconnect() {
+        Log.d(TAG, "Disconnected")
+    }
+
+    override fun onAuthError() {
+        Log.e(TAG, "Auth error")
+    }
+
+    override fun onAuthSuccess() {
+        Log.d(TAG, "Auth success")
     }
 }
