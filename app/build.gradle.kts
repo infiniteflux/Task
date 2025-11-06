@@ -57,9 +57,19 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
-    implementation("com.github.pedroSG94.RootEncoder:library:2.6.5")
+   // implementation("com.github.pedroSG94.RootEncoder:library:2.6.5")
+
+    // dependency for navigation
     implementation("androidx.navigation:navigation-compose:2.7.6")
 
+    // dependencies for third party library.
+    implementation("com.github.pedroSG94:RTSP-Server:1.3.6")
+    implementation("com.github.pedroSG94.RootEncoder:library:2.6.1")
+    // The RTSP module that RTSP-Server depends on
+    implementation("com.github.pedroSG94.RootEncoder:rtsp:2.6.1")
+
+    // Accompanist for permissions
+    implementation("com.google.accompanist:accompanist-permissions:0.32.0")
     implementation("androidx.core:core-ktx:1.13.1")
 
 }

@@ -27,7 +27,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Task">
         <service
-            android:name=".ScreenCastService"
+            android:name=".ScreenStreamingService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />

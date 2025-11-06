@@ -26,7 +26,7 @@ fun SplashScreen(onNavigateToMain: () -> Unit) {
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "Jenish Desai",
+            text = "Abhinav Varma",
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onPrimary
