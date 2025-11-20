@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.pedro.common.ConnectChecker
 import com.pedro.rtspserver.RtspServerDisplay
+//import com.pedro.rtspserver.RtspServerDisplay
 import java.net.NetworkInterface
 
 class ScreenStreamingService : Service(), ConnectChecker {
