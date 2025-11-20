@@ -1,3 +1,13 @@
 # Task
 
-I tried to use the streaming library from PedroSG94 (https://github.com/pedroSG94), but I ran into an issue. I've never worked on a streaming task like this before, and the problem I faced is that the library's documentation was recently updated, and everything has changed. Because of the tight deadline, I am submitting the project as-is.
+I tried to use the streaming library from PedroSG94 (https://github.com/pedroSG94) for RTSP.
+<br>
+dependencies :- 
+<br><ul>
+    implementation("com.github.pedroSG94:RTSP-Server:1.3.6")
+    <br>
+    implementation("com.github.pedroSG94.RootEncoder:library:2.6.1")
+    <br><br>
+    // The RTSP module that RTSP-Server depends on
+    <br>
+    implementation("com.github.pedroSG94.RootEncoder:rtsp:2.6.1")
